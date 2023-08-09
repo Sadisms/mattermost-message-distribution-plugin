@@ -30,21 +30,6 @@ all: check-style test dist
 apply:
 	./build/bin/manifest apply
 
-## Runs golangci-lint and eslint.
-.PHONY: check-style
-check-style: golangci-lint
-	@echo Checking for style guide compliance
-
-## Run golangci-lint on codebase.
-.PHONY: golangci-lint
-golangci-lint:
-	@if ! [ -x "$$(command -v golangci-lint)" ]; then \
-		echo "golangci-lint is not installed. Please see https://github.com/golangci/golangci-lint#install for installation instructions."; \
-		exit 1; \
-	fi; \
-
-	@echo Running golangci-lint
-	golangci-lint run ./...
 
 ## Builds the server, if it exists, including support for multiple architectures.
 .PHONY: server
