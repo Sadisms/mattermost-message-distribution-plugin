@@ -18,8 +18,9 @@ const (
 )
 
 type userOrChannelInfo struct {
-	name string
-	Id   string
+	name   string
+	Id     string
+	isUser bool
 }
 
 func (p *Plugin) registerCommands() error {
@@ -85,13 +86,20 @@ func (p *Plugin) executeCommandMailingSend(args *model.CommandArgs) *model.Comma
 		}
 	}
 
-	usersOrChannelsMentions := fields[0]
-	userText := fields[1]
+	usersOrChannelsMentions := strings.TrimRight(fields[0], " ")
+	userText := strings.TrimLeft(fields[1], " ")
 
 	if !strings.ContainsAny(usersOrChannelsMentions, "@") && !strings.ContainsAny(usersOrChannelsMentions, "~") {
 		return &model.CommandResponse{
 			ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
 			Text:         "Не удалось найти каналы или пользователей =(",
+		}
+	}
+
+	if len(userText) == 0 {
+		return &model.CommandResponse{
+			ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
+			Text:         "Не удалось распознать текст =(",
 		}
 	}
 
@@ -103,7 +111,7 @@ func (p *Plugin) executeCommandMailingSend(args *model.CommandArgs) *model.Comma
 		if strings.HasPrefix(userOrChannelName, "@") {
 			userName := strings.Replace(userOrChannelName, "@", "", 1)
 			if userInfo, _ := p.API.GetUserByUsername(userName); userInfo != nil {
-				userOrChannelIDs = append(userOrChannelIDs, userOrChannelInfo{name: userName, Id: userInfo.Id})
+				userOrChannelIDs = append(userOrChannelIDs, userOrChannelInfo{name: userName, Id: userInfo.Id, isUser: true})
 			} else {
 				excludeUserOrChannelNames = append(excludeUserOrChannelNames, userName)
 			}
@@ -119,7 +127,14 @@ func (p *Plugin) executeCommandMailingSend(args *model.CommandArgs) *model.Comma
 	}
 
 	for _, channelInfo := range userOrChannelIDs {
-		if _, err := p.API.CreatePost(&model.Post{
+		var sendMessageFunc func(postModel *model.Post) (*model.Post, *model.AppError)
+		if channelInfo.isUser {
+			sendMessageFunc = p.createDirectMessage
+		} else {
+			sendMessageFunc = p.API.CreatePost
+		}
+
+		if _, err := sendMessageFunc(&model.Post{
 			UserId:    args.UserId,
 			ChannelId: channelInfo.Id,
 			Message:   userText,
@@ -134,7 +149,6 @@ func (p *Plugin) executeCommandMailingSend(args *model.CommandArgs) *model.Comma
 			Text:         "Не удалось отправить сообщение =(",
 		}
 	}
-
 	if len(excludeUserOrChannelNames) != 0 {
 		return &model.CommandResponse{
 			ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
@@ -146,4 +160,22 @@ func (p *Plugin) executeCommandMailingSend(args *model.CommandArgs) *model.Comma
 		ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
 		Text:         "Сообщение отправлено!",
 	}
+}
+
+func (p *Plugin) createDirectMessage(postModel *model.Post) (*model.Post, *model.AppError) {
+	direct, err := p.API.GetDirectChannel(postModel.ChannelId, postModel.UserId)
+	if err != nil {
+		return nil, err
+	}
+
+	post, err := p.API.CreatePost(&model.Post{
+		UserId:    postModel.UserId,
+		ChannelId: direct.Id,
+		Message:   postModel.Message,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return post, nil
 }
