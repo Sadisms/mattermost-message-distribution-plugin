@@ -14,17 +14,22 @@ const (
 )
 
 const (
-	messageFormat = "<@UserName's or ~ChannelName's> <Text>"
+	messageFormat = "<@UserName's or ~ChannelName's> : <Text>"
 )
+
+type userOrChannelInfo struct {
+	name string
+	Id   string
+}
 
 func (p *Plugin) registerCommands() error {
 	commands := [...]model.Command{
-		model.Command{
+		{
 			Trigger:          mailingCommand,
 			AutoComplete:     true,
 			AutoCompleteDesc: "Отобразить информацию",
 		},
-		model.Command{
+		{
 			Trigger:          mailingCommandSend,
 			AutoComplete:     true,
 			AutoCompleteHint: messageFormat,
@@ -41,20 +46,16 @@ func (p *Plugin) registerCommands() error {
 	return nil
 }
 
-func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*model.CommandResponse, *model.AppError) {
+func (p *Plugin) ExecuteCommand(_ *plugin.Context, args *model.CommandArgs) (*model.CommandResponse, *model.AppError) {
 	trigger := strings.TrimPrefix(args.Command, "/")
 	trigger = strings.TrimSuffix(trigger, " ")
 
 	if trigger == mailingCommand {
-		return &model.CommandResponse{
-			ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
-			Text: "Этот плагин рассылает заданным пользователям/каналам сообщение. " +
-				"Сделайте рассылку с помощью команды: /" + mailingCommandSend + ": " + messageFormat,
-		}, nil
+		return p.executeCommandMailing(), nil
 	}
 
-	if trigger == mailingCommandSend {
-		return p.executeCommandMailing(), nil
+	if strings.ContainsAny(trigger, mailingCommandSend) {
+		return p.executeCommandMailingSend(args), nil
 	}
 
 	//return an error message when the command has not been detected at all
@@ -94,15 +95,15 @@ func (p *Plugin) executeCommandMailingSend(args *model.CommandArgs) *model.Comma
 		}
 	}
 
-	userOrChannelNames := strings.Split(usersOrChannelsMentions, " ")
-	userOrChannelIDs := make([]string, 0)
+	userOrChannelNames := removeDuplicates(strings.Split(usersOrChannelsMentions, " "))
+	userOrChannelIDs := make([]userOrChannelInfo, 0)
 	excludeUserOrChannelNames := make([]string, 0)
 
 	for _, userOrChannelName := range userOrChannelNames {
 		if strings.HasPrefix(userOrChannelName, "@") {
 			userName := strings.Replace(userOrChannelName, "@", "", 1)
 			if userInfo, _ := p.API.GetUserByUsername(userName); userInfo != nil {
-				userOrChannelIDs = append(userOrChannelIDs, userInfo.Id)
+				userOrChannelIDs = append(userOrChannelIDs, userOrChannelInfo{name: userName, Id: userInfo.Id})
 			} else {
 				excludeUserOrChannelNames = append(excludeUserOrChannelNames, userName)
 			}
@@ -110,20 +111,20 @@ func (p *Plugin) executeCommandMailingSend(args *model.CommandArgs) *model.Comma
 		} else if strings.HasPrefix(userOrChannelName, "~") {
 			channelName := strings.Replace(userOrChannelName, "~", "", 1)
 			if channelInfo, _ := p.API.GetChannelByName(args.TeamId, channelName, true); channelInfo != nil {
-				userOrChannelIDs = append(userOrChannelIDs, channelInfo.Id)
+				userOrChannelIDs = append(userOrChannelIDs, userOrChannelInfo{name: channelName, Id: channelInfo.Id})
 			} else {
 				excludeUserOrChannelNames = append(excludeUserOrChannelNames, channelName)
 			}
 		}
 	}
 
-	for _, channelID := range userOrChannelIDs {
+	for _, channelInfo := range userOrChannelIDs {
 		if _, err := p.API.CreatePost(&model.Post{
 			UserId:    args.UserId,
-			ChannelId: channelID,
+			ChannelId: channelInfo.Id,
 			Message:   userText,
 		}); err != nil {
-			excludeUserOrChannelNames = append(excludeUserOrChannelNames, channelID)
+			excludeUserOrChannelNames = append(excludeUserOrChannelNames, channelInfo.name)
 		}
 	}
 
